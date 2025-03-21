@@ -1,0 +1,18 @@
+# Ignorer le répertoire bordereaux et son contenu
+bordereaux/
+
+# Ignorer le fichier .env
+.env
+
+# Ignorer les fichiers de configuration de l'IDE et les fichiers temporaires
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignorer les fichiers de configuration de l'IDE
+.vscode/
+.idea/
+
+# Ignorer les fichiers de configuration de l'environnement
+.venv/
