@@ -15,6 +15,27 @@
 - Un compte email avec accès IMAP (testé avec Gmail)
 - Les bibliothèques Python suivantes : `python-dotenv`, `imaplib`, `email`, `PyMuPDF`, `Pillow`, `pathlib`
 
+## Configuration du Compte Gmail
+
+Pour utiliser ce script avec un compte Gmail, vous devez configurer un mot de passe d'application spécifique ou activer l'accès pour les applications moins sécurisées. Voici comment procéder :
+
+### Option 1 : Mot de passe d'application (recommandé)
+
+1. **Activer l'authentification à deux facteurs** : Si ce n'est pas déjà fait, activez l'authentification à deux facteurs sur votre compte Google.
+
+2. **Générer un mot de passe d'application** :
+   - Allez sur [cette page](https://myaccount.google.com/apppasswords).
+   - Sélectionnez "Mail" pour l'application et choisissez votre appareil.
+   - Cliquez sur "Générer" pour obtenir un mot de passe d'application.
+
+3. **Utiliser le mot de passe d'application** : Utilisez ce mot de passe dans votre fichier `.env` à la place de votre mot de passe habituel.
+
+### Option 2 : Accès pour les applications moins sécurisées
+
+1. **Activer l'accès** : Allez sur [cette page](https://myaccount.google.com/lesssecureapps) et activez l'option "Autoriser les applications moins sécurisées".
+
+**Remarque** : L'utilisation d'un mot de passe d'application est recommandée pour des raisons de sécurité.
+
 ## Installation
 
 1. Clonez ce dépôt ou téléchargez le script `bordereaux.py`.
