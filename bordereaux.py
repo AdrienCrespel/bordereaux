@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 import fitz
 from PIL import Image
+import img2pdf
 
 # Configurer le logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -137,12 +138,13 @@ def crop_shipping_document(pdf_path, transporter):
         return []
 
 def merge_images_to_pdf(image_paths, output_pdf_path):
-    """Fusionner les images en un seul PDF."""
+    """Fusionner les images en un seul PDF avec une haute qualité en utilisant img2pdf."""
     try:
-        images = [Image.open(image_path).convert("RGB") for image_path in image_paths]
-        if images:
-            images[0].save(output_pdf_path, save_all=True, append_images=images[1:])
-            logging.info(f"PDF fusionné enregistré : {output_pdf_path}")
+        # Convertir les images en PDF
+        with open(output_pdf_path, "wb") as f:
+            f.write(img2pdf.convert(image_paths))
+
+        logging.info(f"PDF fusionné enregistré avec une haute qualité : {output_pdf_path}")
     except Exception as e:
         logging.error(f"Erreur lors de la fusion des images en PDF: {e}")
 

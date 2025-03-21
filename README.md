@@ -13,7 +13,7 @@
 
 - Python 3.x
 - Un compte email avec accès IMAP (testé avec Gmail)
-- Les bibliothèques Python suivantes : `python-dotenv`, `imaplib`, `email`, `PyMuPDF`, `Pillow`, `pathlib`
+- Les bibliothèques Python suivantes : `python-dotenv`, `imaplib`, `email`, `PyMuPDF`, `Pillow`, `pathlib`, `img2pdf`
 
 ## Configuration du Compte Gmail
 
@@ -43,7 +43,7 @@ Pour utiliser ce script avec un compte Gmail, vous devez configurer un mot de pa
 2. Installez les dépendances nécessaires :
 
     ```bash
-    pip install python-dotenv PyMuPDF Pillow
+    pip install python-dotenv PyMuPDF Pillow img2pdf
     ```
 
 3. Créez un fichier `.env` dans le même répertoire que le script avec les informations d'identification de votre compte email :
