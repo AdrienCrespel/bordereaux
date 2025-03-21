@@ -1,8 +1,10 @@
 import os
+import re
 import logging
 from dotenv import load_dotenv
 import imaplib
 import email
+from email.header import decode_header
 from pathlib import Path
 from datetime import datetime
 import fitz
@@ -51,15 +53,37 @@ def connect_to_mailbox(email_address, password, imap_server="imap.gmail.com"):
         logging.error(f"Erreur de connexion à la boîte mail: {e}")
         raise
 
+def extract_id_from_subject(subject):
+    """Extraire l'ID du sujet de l'email."""
+    # Expression régulière pour extraire l'ID (séquence alphanumérique)
+    match = re.search(r'pour ([\w-]+) -', subject)
+    if match:
+        return match.group(1)
+    return "UNKNOWN"
+
 def get_unread_emails_with_subject(mail, subject_keyword):
-    """Récupérer les emails non lus avec un sujet donné."""
+    """Récupérer les emails non lus avec un sujet donné et extraire les IDs."""
     try:
         mail.select("inbox")
         search_criteria = f'(UNSEEN SUBJECT "{subject_keyword}")'
         status, messages = mail.search(None, search_criteria)
         email_ids = messages[0].split()
-        logging.info(f"Nombre de mails trouvés : {len(email_ids)}")
-        return email_ids
+
+        email_subjects_and_ids = []
+        for email_id in email_ids:
+            status, msg_data = mail.fetch(email_id, '(RFC822)')
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    decoded_subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(decoded_subject, bytes):
+                        # Si le sujet est en bytes, le décoder
+                        decoded_subject = decoded_subject.decode(encoding if encoding else "utf-8")
+                    email_subject = decoded_subject
+                    email_id_extracted = extract_id_from_subject(email_subject)
+                    email_subjects_and_ids.append((email_id, email_id_extracted))
+
+        return email_subjects_and_ids
     except Exception as e:
         logging.error(f"Erreur lors de la recherche des emails: {e}")
         return []
@@ -156,17 +180,27 @@ def merge_images_to_pdf(image_paths, output_pdf_path):
     except Exception as e:
         logging.error(f"Erreur lors de la fusion des images en PDF: {e}")
 
+def save_ids_to_file(ids, output_file_path):
+    """Enregistrer les IDs extraits dans un fichier texte."""
+    try:
+        with open(output_file_path, 'w') as file:
+            for id_value in ids:
+                file.write(f"{id_value}\n")
+        logging.info(f"IDs enregistrés dans le fichier : {output_file_path}")
+    except Exception as e:
+        logging.error(f"Erreur lors de l'enregistrement des IDs dans le fichier : {e}")
+
 def main():
     mail = connect_to_mailbox(email_address, password)
     subject_keyword = "Bordereau d'envoi Vinted"
-    unread_emails = get_unread_emails_with_subject(mail, subject_keyword)
+    unread_emails_with_ids = get_unread_emails_with_subject(mail, subject_keyword)
 
     now = datetime.now()
     date_folder_name = now.strftime("%Y-%m-%d_%H-%M-%S")
     base_path = Path("bordereaux")
     date_folder = base_path / date_folder_name
 
-    downloaded_pdfs = download_attachments_by_transporter(mail, unread_emails, date_folder)
+    downloaded_pdfs = download_attachments_by_transporter(mail, [email_id for email_id, _ in unread_emails_with_ids], date_folder)
 
     cropped_pdfs = []
     for pdf_path in downloaded_pdfs:
@@ -175,8 +209,21 @@ def main():
         cropped_pdfs.append(cropped_images)
 
     all_cropped_images = [img for cropped_set in cropped_pdfs for img in cropped_set]
-    output_pdf_path = date_folder / "bordereaux.pdf"
-    merge_images_to_pdf(all_cropped_images, output_pdf_path)
+
+    if all_cropped_images:
+        output_pdf_path = date_folder / "bordereaux.pdf"
+        merge_images_to_pdf(all_cropped_images, output_pdf_path)
+    else:
+        logging.info("Aucune image à fusionner en PDF.")
+
+    extracted_ids = [email_id for _, email_id in unread_emails_with_ids if email_id is not None]
+
+    if extracted_ids:
+        ids_file_path = date_folder / "bordereaux.txt"
+        save_ids_to_file(extracted_ids, ids_file_path)
+    else:
+        logging.info("Aucun ID à enregistrer.")
+    
 
 if __name__ == "__main__":
     main()
