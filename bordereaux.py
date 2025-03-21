@@ -86,7 +86,8 @@ def download_attachments_by_transporter(mail, unread_emails, date_folder):
 
                     if msg.is_multipart():
                         for part in msg.walk():
-                            if part.get_content_type() == "text/plain":
+                            content_type = part.get_content_type()
+                            if content_type == "text/plain" or content_type == "text/html":
                                 email_body = part.get_payload(decode=True).decode(part.get_content_charset(), errors="ignore")
                                 break
                     else:
@@ -124,7 +125,14 @@ def crop_shipping_document(pdf_path, transporter):
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
+            # Appliquer le rognage
             cropped_img = img.crop(crop_rules.get(transporter, crop_rules["autres"]))
+
+            # Appliquer une rotation de 90 degrés pour Mondial Relay
+            if transporter == "mondial-relay":
+                cropped_img = cropped_img.rotate(90, expand=True)
+
+            # Construire le nom de fichier de sortie
             cropped_file_name = f"cropped_{pdf_path.stem}.png"
             cropped_file_path = pdf_path.parent / cropped_file_name
 
@@ -138,13 +146,13 @@ def crop_shipping_document(pdf_path, transporter):
         return []
 
 def merge_images_to_pdf(image_paths, output_pdf_path):
-    """Fusionner les images en un seul PDF avec une haute qualité en utilisant img2pdf."""
+    """Fusionner les images en un seul PDF sans agrandir les images."""
     try:
-        # Convertir les images en PDF
+        # Convertir les images en PDF sans les agrandir
         with open(output_pdf_path, "wb") as f:
             f.write(img2pdf.convert(image_paths))
 
-        logging.info(f"PDF fusionné enregistré avec une haute qualité : {output_pdf_path}")
+        logging.info(f"PDF fusionné enregistré : {output_pdf_path}")
     except Exception as e:
         logging.error(f"Erreur lors de la fusion des images en PDF: {e}")
 
