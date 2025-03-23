@@ -7,9 +7,7 @@ import email
 from email.header import decode_header
 from pathlib import Path
 from datetime import datetime
-import fitz
-from PIL import Image
-import img2pdf
+import PyPDF2
 
 # Configurer le logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,16 +29,39 @@ transporters = {
     "colissimo": "La Poste"
 }
 
-# Règles de rognage pour chaque transporteur
-crop_rules = {
-    "chronopost": (425, 0, 840, 600),
-    "vinted-go": (5, 5, 295, 415),
-    "mondial-relay": (0, 0, 600, 400),
-    "relais-colis": (0, 70, 410, 600),
-    "ups": (5, 5, 330, 450),
-    "colissimo": (0, 0, 415, 600),
-    "autres": (0, 0, 600, 800)  # Règle par défaut
-}
+# Dictionnaire des formats et leurs règles de découpe
+def get_cut_coordinates(transporter, width, height):
+    """Retourne les coordonnées de découpe (lower_left, upper_right) en fonction du format."""
+    
+    if transporter == "mondial-relay":
+        # Découpe horizontale (partie supérieure) + rotation de 90°
+        return (0, height / 2), (width, height), "rotate"
+    
+    elif transporter == "chronopost":
+        # Découpe verticale (partie droite)
+        return (width / 2, 0), (width, height), None
+    
+    elif transporter == "relais-colis":
+        # Découpe verticale (partie gauche)
+        return (0, 0), (width / 2, height), None
+    
+    elif transporter == "vinted-go":
+        # Découpe verticale (au milieu) : conserver la partie gauche
+        return (0, height / 2), (width / 2, height), None
+
+    elif transporter == "colissimo":
+        # Découpe verticale (au milieu) : conserver la partie gauche
+        return (0, 0), (width/2, height), None
+    
+    elif transporter == "ups":
+        # Découpe verticale à 40.1% du bord gauche
+        vertical_cut = width * 0.401
+        # Découpe horizontale à 23.3% du bord bas
+        horizontal_cut = height * 0.233
+        return (0, horizontal_cut), (vertical_cut, height), None
+
+    else:
+        logging.error(f"Transporteur '{transporter}' non reconnu.")
 
 def connect_to_mailbox(email_address, password, imap_server="imap.gmail.com"):
     """Connexion à la boîte mail."""
@@ -141,44 +162,51 @@ def download_attachments_by_transporter(mail, unread_emails, date_folder):
 def crop_shipping_document(pdf_path, transporter):
     """Rogner le document PDF en fonction du transporteur."""
     try:
-        document = fitz.open(pdf_path)
-        cropped_images_paths = []
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            writer = PyPDF2.PdfWriter()            
+            page = reader.pages[0]
+            width = page.mediabox.width
+            height = page.mediabox.height
 
-        for page_num in range(len(document)):
-            page = document.load_page(page_num)
-            pix = page.get_pixmap()
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Obtenir les coordonnées de découpe en fonction du transporteur
+            lower_left, upper_right, rotation = get_cut_coordinates(transporter, width, height)
 
-            # Appliquer le rognage
-            cropped_img = img.crop(crop_rules.get(transporter, crop_rules["autres"]))
+             # Appliquer les coordonnées de découpe à la page
+            page.mediabox.lower_left = (int(lower_left[0]), int(lower_left[1]))
+            page.mediabox.upper_right = (int(upper_right[0]), int(upper_right[1]))
 
-            # Appliquer une rotation de 90 degrés pour Mondial Relay
-            if transporter == "mondial-relay":
-                cropped_img = cropped_img.rotate(90, expand=True)
+            # Appliquer la rotation si nécessaire
+            if rotation == "rotate":
+                page.rotate(90)
 
-            # Construire le nom de fichier de sortie
-            cropped_file_name = f"cropped_{pdf_path.stem}.png"
-            cropped_file_path = pdf_path.parent / cropped_file_name
+            # Ajouter la première page découpée au fichier de sortie
+            writer.add_page(page)
 
-            cropped_img.save(cropped_file_path)
-            logging.info(f"Image rognée enregistrée : {cropped_file_path}")
-            cropped_images_paths.append(cropped_file_path)
-
-        return cropped_images_paths
+            # Sauvegarder le nouveau PDF
+            output_pdf = pdf_path.parent / f"cropped_{pdf_path.name}"
+            with open(output_pdf, 'wb') as output_file:
+                writer.write(output_file)
+                logging.info(f"Le pdf rogné a correctement été généré : {output_file.name}")
+            
+            return output_pdf
     except Exception as e:
         logging.error(f"Erreur lors du rognage du PDF {pdf_path}: {e}")
-        return []
+        return None
 
-def merge_images_to_pdf(image_paths, output_pdf_path):
-    """Fusionner les images en un seul PDF sans agrandir les images."""
+def merge_pdfs(pdf_paths, output_pdf_path):
+    """Fusionner les PDF."""
     try:
-        # Convertir les images en PDF sans les agrandir
-        with open(output_pdf_path, "wb") as f:
-            f.write(img2pdf.convert(image_paths))
+        merger = PyPDF2 .PdfMerger()
+        for pdf in pdf_paths:
+            merger.append(pdf)
 
+        # Écrire le fichier fusionné
+        merger.write(output_pdf_path)
+        merger.close()
         logging.info(f"PDF fusionné enregistré : {output_pdf_path}")
     except Exception as e:
-        logging.error(f"Erreur lors de la fusion des images en PDF: {e}")
+        logging.error(f"Erreur lors de la fusion des PDF: {e}")
 
 def save_ids_to_file(ids, output_file_path):
     """Enregistrer les IDs extraits dans un fichier texte."""
@@ -205,16 +233,13 @@ def main():
     cropped_pdfs = []
     for pdf_path in downloaded_pdfs:
         transporter = pdf_path.parent.name
-        cropped_images = crop_shipping_document(pdf_path, transporter)
-        cropped_pdfs.append(cropped_images)
+        cropped_pdfs.append(crop_shipping_document(pdf_path, transporter))
 
-    all_cropped_images = [img for cropped_set in cropped_pdfs for img in cropped_set]
-
-    if all_cropped_images:
+    if cropped_pdfs:
         output_pdf_path = date_folder / "bordereaux.pdf"
-        merge_images_to_pdf(all_cropped_images, output_pdf_path)
+        merge_pdfs(cropped_pdfs, output_pdf_path)
     else:
-        logging.info("Aucune image à fusionner en PDF.")
+        logging.info("Aucun PDF à fusionner.")
 
     extracted_ids = [email_id for _, email_id in unread_emails_with_ids if email_id is not None]
 
