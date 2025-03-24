@@ -7,7 +7,9 @@ import email
 from email.header import decode_header
 from pathlib import Path
 from datetime import datetime
-import PyPDF2
+from reportlab.pdfgen import canvas
+from PyPDF2 import PdfReader, PdfWriter, PdfMerger
+import io
 
 # Configurer le logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,49 +21,57 @@ email_address = os.getenv("EMAIL_ADDRESS")
 password = os.getenv("EMAIL_PASSWORD")
 imap_server = os.getenv("IMAP_SERVER")
 
-# Dictionnaire des transporteurs et leurs noms dans les emails
-transporters = {
-    "chronopost": "Chronopost",
-    "vinted-go": "Vinted Go",
-    "mondial-relay": "Mondial Relay",
-    "relais-colis": "Relais Colis",
-    "ups": "UPS Access",
-    "colissimo": "La Poste"
+# Structure centralisée pour les transporteurs
+transporters_info = {
+    "chronopost": {
+        "name": "Chronopost",
+        "id_position": (510, 510),
+        "cut_rules": lambda width, height: ((width / 2, 0), (width, height), None)
+    },
+    "vinted-go": {
+        "name": "Vinted Go",
+        "id_position": (20, 760),
+        "cut_rules": lambda width, height: ((0, height / 2), (width / 2, height), None)
+    },
+    "mondial-relay": {
+        "name": "Mondial Relay",
+        "id_position": (45, 750),
+        "cut_rules": lambda width, height: ((0, height / 2), (width, height), "rotate")
+    },
+    "relais-colis": {
+        "name": "Relais Colis",
+        "id_position": (100, 500),
+        "cut_rules": lambda width, height: ((0, 0), (width / 2, height), None)
+    },
+    "ups": {
+        "name": "UPS Access",
+        "id_position": (100, 560),
+        "cut_rules": lambda width, height: ((0, height * 0.233), (width * 0.401, height), None)
+    },
+    "colissimo": {
+        "name": "La Poste",
+        "id_position": (50, 510),
+        "cut_rules": lambda width, height: ((0, 0), (width / 2, height), None)
+    },
+    "autres": {
+        "name": "Autres",
+        "id_position": (50, 500),
+        "cut_rules": lambda width, height: ((0, 0), (width, height), None)
+    }
 }
 
-# Dictionnaire des formats et leurs règles de découpe
+def get_transporter_name(transporter):
+    """Obtenir le nom du transporteur."""
+    return transporters_info.get(transporter, {}).get("name", "Inconnu")
+
+def get_id_position(transporter, width, height):
+    """Obtenir les coordonnées pour l'ID du transporteur."""
+    return transporters_info.get(transporter, {}).get("id_position", (0, 0))
+
 def get_cut_coordinates(transporter, width, height):
-    """Retourne les coordonnées de découpe (lower_left, upper_right) en fonction du format."""
-    
-    if transporter == "mondial-relay":
-        # Découpe horizontale (partie supérieure) + rotation de 90°
-        return (0, height / 2), (width, height), "rotate"
-    
-    elif transporter == "chronopost":
-        # Découpe verticale (partie droite)
-        return (width / 2, 0), (width, height), None
-    
-    elif transporter == "relais-colis":
-        # Découpe verticale (partie gauche)
-        return (0, 0), (width / 2, height), None
-    
-    elif transporter == "vinted-go":
-        # Découpe verticale (au milieu) : conserver la partie gauche
-        return (0, height / 2), (width / 2, height), None
-
-    elif transporter == "colissimo":
-        # Découpe verticale (au milieu) : conserver la partie gauche
-        return (0, 0), (width/2, height), None
-    
-    elif transporter == "ups":
-        # Découpe verticale à 40.1% du bord gauche
-        vertical_cut = width * 0.401
-        # Découpe horizontale à 23.3% du bord bas
-        horizontal_cut = height * 0.233
-        return (0, horizontal_cut), (vertical_cut, height), None
-
-    else:
-        logging.error(f"Transporteur '{transporter}' non reconnu.")
+    """Obtenir les coordonnées de découpe pour le transporteur."""
+    cut_rules = transporters_info.get(transporter, {}).get("cut_rules", lambda w, h: ((0, 0), (w, h), None))
+    return cut_rules(width, height)
 
 def connect_to_mailbox(email_address, password, imap_server="imap.gmail.com"):
     """Connexion à la boîte mail."""
@@ -112,8 +122,8 @@ def get_unread_emails_with_subject(mail, subject_keyword):
 def get_transporter_from_email_body(email_body):
     """Déterminer le transporteur à partir du corps de l'email."""
     email_body_lower = email_body.lower()
-    for transporter, keyword in transporters.items():
-        if keyword.lower() in email_body_lower:
+    for transporter, info in transporters_info.items():
+        if info["name"].lower() in email_body_lower:
             return transporter
     return "autres"
 
@@ -159,12 +169,54 @@ def download_attachments_by_transporter(mail, unread_emails, date_folder):
 
     return downloaded_pdfs
 
-def crop_shipping_document(pdf_path, transporter):
-    """Rogner le document PDF en fonction du transporteur."""
+def add_id_to_pdf(input_pdf_path, output_pdf_path, id_text, transporter):
+    """Ajouter l'ID sur le PDF en fonction du transporteur."""
+    try:
+        # Lire le PDF existant
+        reader = PdfReader(input_pdf_path)
+        writer = PdfWriter()
+
+        # Parcourir chaque page du PDF (ici, une seule page)
+        page = reader.pages[0]
+        packet = io.BytesIO()
+        width = page.mediabox.width
+        height = page.mediabox.height
+
+        print(width, height)
+
+        # Obtenir les coordonnées pour le transporteur
+        x, y = get_id_position(transporter, width, height)
+        
+        print(x, y)
+
+        # Créer un canevas pour dessiner sur la page
+        can = canvas.Canvas(packet)
+        can.drawString(x, y, f"SKU: {id_text}")  # Positionner l'ID selon le transporteur
+        can.save()
+
+        # Mouvement vers le début du flux
+        packet.seek(0)
+        new_pdf = PdfReader(packet)
+        new_page = new_pdf.pages[0]
+
+        # Ajouter le contenu du canevas à la page existante
+        page.merge_page(new_page)
+        writer.add_page(page)
+
+        # Enregistrer le PDF modifié
+        with open(output_pdf_path, "wb") as f:
+            writer.write(f)
+
+        logging.info(f"ID ajouté au PDF : {output_pdf_path}")
+    except Exception as e:
+        logging.error(f"Erreur lors de l'ajout de l'ID au PDF: {e}")
+
+def crop_shipping_document(pdf_path, transporter, extracted_id):
+    """Rogner le document PDF et ajouter l'ID en fonction du transporteur."""
     try:
         with open(pdf_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            writer = PyPDF2.PdfWriter()            
+            reader = PdfReader(file)
+            writer = PdfWriter()            
             page = reader.pages[0]
             width = page.mediabox.width
             height = page.mediabox.height
@@ -189,6 +241,9 @@ def crop_shipping_document(pdf_path, transporter):
                 writer.write(output_file)
                 logging.info(f"Le pdf rogné a correctement été généré : {output_file.name}")
             
+            # Ajouter l'ID sur le PDF
+            add_id_to_pdf(output_pdf, output_pdf, extracted_id, transporter)
+            
             return output_pdf
     except Exception as e:
         logging.error(f"Erreur lors du rognage du PDF {pdf_path}: {e}")
@@ -197,7 +252,7 @@ def crop_shipping_document(pdf_path, transporter):
 def merge_pdfs(pdf_paths, output_pdf_path):
     """Fusionner les PDF."""
     try:
-        merger = PyPDF2 .PdfMerger()
+        merger = PdfMerger()
         for pdf in pdf_paths:
             merger.append(pdf)
 
@@ -228,21 +283,31 @@ def main():
     base_path = Path("bordereaux")
     date_folder = base_path / date_folder_name
 
-    downloaded_pdfs = download_attachments_by_transporter(mail, [email_id for email_id, _ in unread_emails_with_ids], date_folder)
+    # Télécharger les PDFs et associer chaque PDF à son ID
+    downloaded_pdfs_with_ids = []
+    for email_id, extracted_id in unread_emails_with_ids:
+        downloaded_pdfs = download_attachments_by_transporter(mail, [email_id], date_folder)
+        for pdf_path in downloaded_pdfs:
+            downloaded_pdfs_with_ids.append((pdf_path, extracted_id))
 
-    cropped_pdfs = []
-    for pdf_path in downloaded_pdfs:
+    cropped_pdfs_with_ids = []
+    for pdf_path, extracted_id in downloaded_pdfs_with_ids:
         transporter = pdf_path.parent.name
-        cropped_pdfs.append(crop_shipping_document(pdf_path, transporter))
+        cropped_pdf = crop_shipping_document(pdf_path, transporter, extracted_id)
+        if cropped_pdf:
+            cropped_pdfs_with_ids.append((cropped_pdf, extracted_id))
 
-    if cropped_pdfs:
+    # Vérifier s'il y a des PDFs à fusionner
+    if cropped_pdfs_with_ids:
         output_pdf_path = date_folder / "bordereaux.pdf"
-        merge_pdfs(cropped_pdfs, output_pdf_path)
+        merge_pdfs([pdf for pdf, _ in cropped_pdfs_with_ids], output_pdf_path)
     else:
         logging.info("Aucun PDF à fusionner.")
 
-    extracted_ids = [email_id for _, email_id in unread_emails_with_ids if email_id is not None]
+    # Extraire les IDs et les enregistrer dans un fichier texte
+    extracted_ids = [extracted_id for _, extracted_id in unread_emails_with_ids if extracted_id is not None]
 
+    # Vérifier s'il y a des IDs à enregistrer
     if extracted_ids:
         ids_file_path = date_folder / "bordereaux.txt"
         save_ids_to_file(extracted_ids, ids_file_path)
